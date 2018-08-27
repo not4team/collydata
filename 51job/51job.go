@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gocolly/colly"
 	"github.com/gocolly/colly/debug"
-	"github.com/gocolly/colly/extensions"
 )
 
 /* __VIEWSTATE	/wEPDwUKLTEzNTAwODM0MA9kFgICAQ9kFgICAQ8PFgIeCEltYWdlVXJsBUAvL2ltZzA3LjUxam9iY2RuLmNvbS9pbWVoaXJlL2VoaXJlMjAwNy9kZWZhdWx0bmV3L2ltYWdlL2xhbmcuZ2lmFgIeB09uQ2xpY2sFE3JldHVybiBTZXRMYW5nKCcnKTtkGAEFHl9fQ29udHJvbHNSZXF1aXJlUG9zdEJhY2tLZXlfXxYBBQtja2JSZW1lbWJlcg==
@@ -47,10 +49,23 @@ func main() {
 		colly.Debugger(&debug.LogDebugger{}),
 	)
 
+	c.WithTransport(&http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			DualStack: true,
+		}).DialContext,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	})
+
 	c.IgnoreRobotsTxt = true
 	c.RedirectHandler = func(req *http.Request, via []*http.Request) error {
 		fmt.Println("redirectHandler:", req.URL.String())
-		if req.URL.String() == "http://ehire.51job.com" || req.URL.String() == "https://ehire.51job.com/" {
+		if req.URL.String() == "http://ehire.51job.com" || req.URL.String() == "https://ehire.51job.com/" || strings.Contains(req.URL.String(), "https://ehire.51job.com/MainLogin.aspx") {
 			return http.ErrUseLastResponse
 		}
 		// Honor golangs default of maximum of 10 redirects
@@ -75,8 +90,8 @@ func main() {
 		return nil
 	}
 
-	extensions.RandomUserAgent(c)
-	extensions.Referrer(c)
+	// extensions.RandomUserAgent(c)
+	// extensions.Referrer(c)
 
 	// On every a element which has href attribute call callback
 	c.OnHTML("form#form1", func(e *colly.HTMLElement) {
@@ -114,6 +129,23 @@ func main() {
 				log.Fatalln(err)
 			} else {
 				fmt.Println("tk is " + tk + ",hidTkey is " + hidTkey)
+				cookies := c.Cookies(RealLoginURL)
+				// ASP.NET_SessionId	5bbvl4pkg2hf5jr4cowtwffv
+				// FSSBBIl1UgzbN7N80S	67PTPRd3hw7QcZXKquVjkyoSwbs41DcS7alWtb9XAyIXpdXcHG0SeZ38QAMHJpSc
+				// FSSBBIl1UgzbN7N80T	2lodZrNk7DxZoI5UVAQJp.e_XYG4rPH3ShSHc450sX5FvxZ.EE95Z6YuAaREd10VkyN2AGqXMhTDDgwo3G0USwCV4c0VWyMFALGoPZJUhsR9r8DNIk4janYJVyF_vRl3ZICOe6G2TLx1xqJ47JpHTvpr01Jc6OJuxlY_GpXqJEuC0Gb1r7wUz9lXNlTbDOeOVtt0
+				// LangType	Lang=&Flag=1
+				FSSBBIl1UgzbN7N80S := &http.Cookie{
+					Name:  "FSSBBIl1UgzbN7N80S",
+					Value: "67PTPRd3hw7QcZXKquVjkyoSwbs41DcS7alWtb9XAyIXpdXcHG0SeZ38QAMHJpSc",
+				}
+				FSSBBIl1UgzbN7N80T := &http.Cookie{
+					Name:  "FSSBBIl1UgzbN7N80T",
+					Value: "2lodZrNk7DxZoI5UVAQJp.e_XYG4rPH3ShSHc450sX5FvxZ.EE95Z6YuAaREd10VkyN2AGqXMhTDDgwo3G0USwCV4c0VWyMFALGoPZJUhsR9r8DNIk4janYJVyF_vRl3ZICOe6G2TLx1xqJ47JpHTvpr01Jc6OJuxlY_GpXqJEuC0Gb1r7wUz9lXNlTbDOeOVtt0",
+				}
+				cookies = append(cookies, FSSBBIl1UgzbN7N80S)
+				cookies = append(cookies, FSSBBIl1UgzbN7N80T)
+				fmt.Printf("cookies is:%v\n", cookies)
+				c.SetCookies(RealLoginURL, cookies)
 				// authenticate
 				// tk是同步请求https://ehire.51job.com/ajax/Sec/v.aspx后的值
 				err := c.Post(RealLoginURL, map[string]string{"__VIEWSTATE": _ViewState, "checkCode": "", "ctmName": "中软国际总部", "ec": ec, "fksc": fksc, "hidAccessKey": hidAccessKey,
@@ -129,13 +161,43 @@ func main() {
 
 	c.OnResponse(func(r *colly.Response) {
 		fmt.Println("Visited", r.Request.URL)
-		cookies := c.Cookies(r.Request.URL.String())
-		fmt.Printf("cookies is:%v\n", cookies)
 	})
 
 	// Before making a request print "Visiting ..."
 	c.OnRequest(func(r *colly.Request) {
+		// Accept	text/html,application/xhtml+xm…plication/xml;q=0.9,*/*;q=0.8
+		// Accept-Encoding	gzip, deflate, br
+		// Accept-Language	zh-CN,en-US;q=0.7,en;q=0.3
+		// Cache-Control	max-age=0
+		// Connection	keep-alive
+		// Host	ehire.51job.com
+		// Upgrade-Insecure-Requests	1
+		// User-Agent	Mozilla/5.0 (X11; Linux x86_64…) Gecko/20100101 Firefox/59.0
 		fmt.Println("Visiting", r.URL.String())
+		r.Headers.Set("Accept", "text/html,application/xhtml+xm…plication/xml;q=0.9,*/*;q=0.8")
+		r.Headers.Set("Accept-Encoding", "gzip, deflate, br")
+		r.Headers.Set("Accept-Language", "zh-CN,en-US;q=0.7,en;q=0.3")
+		r.Headers.Set("Cache-Control", "max-age=0")
+		r.Headers.Set("Connection", "keep-alive")
+		r.Headers.Set("Upgrade-Insecure-Requests", "1")
+		r.Headers.Set("Referer", "https://ehire.51job.com/MainLogin.aspx")
+		r.Headers.Set("Host", "ehirelogin.51job.com")
+		cookies := ""
+		cookieUrl := ""
+		if strings.Contains(r.URL.String(), LoginURL) {
+			cookieUrl = LoginURL
+		} else if strings.Contains(r.URL.String(), LoginURL) {
+			cookieUrl = RealLoginURL
+		}
+		for _, value := range c.Cookies(cookieUrl) {
+			cookies += value.Name + "=" + value.Value + ";"
+		}
+		r.Headers.Set("Cookie", cookies)
+		for hName, hValues := range *r.Headers {
+			for _, hValue := range hValues {
+				fmt.Println(hName + ":" + hValue)
+			}
+		}
 	})
 
 	fmt.Println("**************visit***************")
