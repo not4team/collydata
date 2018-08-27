@@ -37,18 +37,41 @@ userName	GRC2_TEMP_Test
 verifyGuid	D75C095738076ADDA4A6 */
 
 func main() {
+	fmt.Println("**************start***************")
 	// Instantiate default collector
 	c := colly.NewCollector(
 		// Visit only domains: hackerspaces.org, wiki.hackerspaces.org
-		colly.AllowedDomains("51job.com"),
+		colly.AllowedDomains("ehire.51job.com", "ehirelogin.51job.com"),
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:62.0) Gecko/20100101 Firefox/62.0"),
-		colly.AllowURLRevisit(),
+		// colly.AllowURLRevisit(),
 		colly.Debugger(&debug.LogDebugger{}),
 	)
 
 	c.IgnoreRobotsTxt = true
 	c.RedirectHandler = func(req *http.Request, via []*http.Request) error {
 		fmt.Println("redirectHandler:", req.URL.String())
+		if req.URL.String() == "http://ehire.51job.com" || req.URL.String() == "https://ehire.51job.com/" {
+			return http.ErrUseLastResponse
+		}
+		// Honor golangs default of maximum of 10 redirects
+		if len(via) >= 10 {
+			return http.ErrUseLastResponse
+		}
+
+		lastRequest := via[len(via)-1]
+
+		// Copy the headers from last request
+		for hName, hValues := range lastRequest.Header {
+			for _, hValue := range hValues {
+				req.Header.Set(hName, hValue)
+			}
+		}
+
+		// If domain has changed, remove the Authorization-header if it exists
+		if req.URL.Host != lastRequest.URL.Host {
+			req.Header.Del("Authorization")
+		}
+
 		return nil
 	}
 
@@ -86,15 +109,22 @@ func main() {
 			fmt.Println("hidVGuid is:", hidVGuid)
 		}
 
-		// authenticate
-		// tk是同步请求https://ehire.51job.com/ajax/Sec/v.aspx后的值
-		err := c.Post(RealLoginURL, map[string]string{"__VIEWSTATE": _ViewState, "checkCode": "", "ctmName": "中软国际总部", "ec": ec, "fksc": fksc, "hidAccessKey": hidAccessKey,
-			"hidEhireGuid": ec, "hidLangType": hidLangType, "hidRetUrl": "", "hidTkey": hidTkey, "hidVGuid": hidVGuid, "isRememberMe": "false", "langtype": hidLangType,
-			"oldAccessKey": hidAccessKey, "password": "zhongruan201", "referrurl": "", "returl": "", "sc": fksc, "sk": hidTkey, "tk": "暂定",
-			"txtMemberNameCN": "中软国际总部", "txtPasswordCN": "zhongruan201", "txtUserNameCN": "GRC2_TEMP_Test", "userName": "GRC2_TEMP_Test", "verifyGuid": hidVGuid})
-		if err != nil {
-			log.Fatal(err)
-		}
+		getTk(c, fksc, hidTkey, func(tk string, hidTkey string, err error) {
+			if err != nil {
+				log.Fatalln(err)
+			} else {
+				fmt.Println("tk is " + tk + ",hidTkey is " + hidTkey)
+				// authenticate
+				// tk是同步请求https://ehire.51job.com/ajax/Sec/v.aspx后的值
+				err := c.Post(RealLoginURL, map[string]string{"__VIEWSTATE": _ViewState, "checkCode": "", "ctmName": "中软国际总部", "ec": ec, "fksc": fksc, "hidAccessKey": hidAccessKey,
+					"hidEhireGuid": ec, "hidLangType": hidLangType, "hidRetUrl": "", "hidTkey": hidTkey, "hidVGuid": hidVGuid, "isRememberMe": "false", "langtype": hidLangType,
+					"oldAccessKey": hidAccessKey, "password": "zhongruan201", "referrurl": "https://ehire.51job.com/MainLogin.aspx", "returl": "%2fNavigate.aspx%3fShowTips%3d11%26PwdComplexity%3dN", "sc": fksc, "sk": hidTkey, "tk": tk,
+					"txtMemberNameCN": "中软国际总部", "txtPasswordCN": "zhongruan201", "txtUserNameCN": "GRC2_TEMP_Test", "userName": "GRC2_TEMP_Test", "verifyGuid": hidVGuid})
+				if err != nil {
+					log.Fatal(err)
+				}
+			}
+		})
 	})
 
 	c.OnResponse(func(r *colly.Response) {
@@ -108,7 +138,7 @@ func main() {
 		fmt.Println("Visiting", r.URL.String())
 	})
 
+	fmt.Println("**************visit***************")
 	// Start scraping on https://hackerspaces.org
 	c.Visit(LoginURL)
-
 }
